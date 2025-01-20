@@ -25,16 +25,44 @@ LogBanner = [[
 
 
 -- Authentification Command (Todo:: Use Enum Library)
-AUTH_LOGON_CHALLENGE        = 0x00
-AUTH_LOGON_PROOF            = 0x01
-AUTH_RECONNECT_CHALLENGE    = 0x02
-AUTH_RECONNECT_PROOF        = 0x03
-REALM_LIST                  = 0x10
-XFER_INITIATE               = 0x30
-XFER_DATA                   = 0x31
-XFER_ACCEPT                 = 0x32
-XFER_RESUME                 = 0x33
-XFER_CANCEL                 = 0x34
+AUTH_LOGON_CHALLENGE                        = 0x00
+AUTH_LOGON_PROOF                            = 0x01
+AUTH_RECONNECT_CHALLENGE                    = 0x02
+AUTH_RECONNECT_PROOF                        = 0x03
+REALM_LIST                                  = 0x10
+XFER_INITIATE                               = 0x30
+XFER_DATA                                   = 0x31
+XFER_ACCEPT                                 = 0x32
+XFER_RESUME                                 = 0x33
+XFER_CANCEL                                 = 0x34
+
+-- Authentification Results (Todo:: Use Enum Library)
+WOW_SUCCESS                                  = 0x00
+WOW_FAIL_BANNED                              = 0x03
+WOW_FAIL_UNKNOWN_ACCOUNT                     = 0x04
+WOW_FAIL_INCORRECT_PASSWORD                  = 0x05
+WOW_FAIL_ALREADY_ONLINE                      = 0x06
+WOW_FAIL_NO_TIME                             = 0x07
+WOW_FAIL_DB_BUSY                             = 0x08
+WOW_FAIL_VERSION_INVALID                     = 0x09
+WOW_FAIL_VERSION_UPDATE                      = 0x0A
+WOW_FAIL_INVALID_SERVER                      = 0x0B
+WOW_FAIL_SUSPENDED                           = 0x0C
+WOW_FAIL_FAIL_NOACCESS                       = 0x0D
+WOW_SUCCESS_SURVEY                           = 0x0E
+WOW_FAIL_PARENTCONTROL                       = 0x0F
+WOW_FAIL_LOCKED_ENFORCED                     = 0x10
+WOW_FAIL_TRIAL_ENDED                         = 0x11
+WOW_FAIL_USE_BATTLENET                       = 0x12
+WOW_FAIL_ANTI_INDULGENCE                     = 0x13
+WOW_FAIL_EXPIRED                             = 0x14
+WOW_FAIL_NO_GAME_ACCOUNT                     = 0x15
+WOW_FAIL_CHARGEBACK                          = 0x16
+WOW_FAIL_INTERNET_GAME_ROOM_WITHOUT_BNET     = 0x17
+WOW_FAIL_GAME_ACCOUNT_LOCKED                 = 0x18
+WOW_FAIL_UNLOCKABLE_LOCK                     = 0x19
+WOW_FAIL_CONVERSION_REQUIRED                 = 0x20
+WOW_FAIL_DISCONNECTED                        = 0xFF
 
 --- Client Packet Class
 class Packet
@@ -103,6 +131,16 @@ class AuthServerHandler
     new: (client) =>
         @client = client
         @packet = {}
+        
+        -- Fixed values for authentication
+        -- 
+        @b = string.rep("\x3e\x32\xa1\x23", 8)      -- TEMP::32 bytes random server key
+        @g = "\x07"                                 -- TEMP::generator = 7
+        @N = string.rep("\xFF\xFF\xFF\xFF", 8)      -- TEMP::32 bytes modulus
+        @salt = string.rep("\x22\x11\x33\x44", 8)   -- TEMP::32 bytes salt
+        @version_challenge = string.rep("\xBA", 16) -- TEMP::16 bytes challenge
+
+        @M2 = string.rep("\xBA", 20)                -- TEMP:: 20 bytes M2
 
     run: =>
         LOG_INFO("> New client connection accepted.")
@@ -117,6 +155,13 @@ class AuthServerHandler
                 LOG_INFO("> Client disconnected")
                 break
             Socket.sleep(.1)
+        return true
+
+    send_packet: (data) =>
+        success, err = @client->send(data)
+        unless success
+            LOG_ERROR("> Failed to send packet: #{err}")
+            return false
         return true
 
     handle_auth_logon_challenge: =>
@@ -157,6 +202,60 @@ class AuthServerHandler
         temp.account_name = auth_challenge_packet->read_string(temp.name_length)
 
         LOG_INFO("> Account #{temp.account_name} trying to connect..")
+        
+        response_data = {
+            string.char(AUTH_LOGON_CHALLENGE),   -- cmd (1 byte)
+            string.char(0x00),                   -- error (1 byte)
+            string.char(WOW_SUCCESS),            -- result (1 byte)
+            @b,                                  -- b value (32 bytes)
+            string.char(0x01),                   -- g length (1 byte)
+            @g,                                  -- g value (1 byte)
+            string.char(0x20),                   -- N length (1 byte) = 32 en decimal
+            @N,                                  -- N value (32 bytes)
+            @salt,                               -- salt (32 bytes)
+            @version_challenge,                  -- version challenge (16 bytes)
+            string.char(0x00)                    -- security flags (1 byte)
+        }
+
+        response_str = table.concat(response_data)
+        success = @send_packet(response_str)
+        
+        return success
+
+    handle_auth_logon_proof: =>
+        remaining_data, err = @client->receive(1 + 20 + 20 + 20 + 1)  -- cmd(1) + A(20) + M1(20) + crc_hash(20) + number_of_keys(1)
+        unless remaining_data
+            LOG_ERROR("> No proof data received: #{err}")
+            return false
+
+        proof_packet = Packet(remaining_data)
+        
+        LOG_INFO("> Received auth proof packet")
+
+        -- Building the proof response
+        response_data = {
+            string.char(AUTH_LOGON_PROOF),      -- cmd (1 byte)
+            string.char(0x00),                  -- error (1 byte)
+            @M2,                                -- M2 (20 bytes)
+            string.char(0x08),                  -- account flags (1 byte)
+            string.char(0x00),                  -- survey id
+            string.char(0x00)                   -- login flags
+        }
+
+        response_str = table.concat(response_data)
+        
+        LOG_INFO("> Sending proof response packet of size: #{#response_str} bytes")
+        
+        if #response_str != 25
+            LOG_ERROR("> Invalid response packet size: #{#response_str} (expected 23)")
+            return false
+
+        success = @send_packet(response_str)
+        unless success
+            LOG_ERROR("> Failed to send proof response")
+            return false
+
+        LOG_INFO("> Auth proof response sent successfully")
         return true
 
     read_client_data: =>
@@ -178,6 +277,10 @@ class AuthServerHandler
         switch @packet.cmd
             when AUTH_LOGON_CHALLENGE
                 return @handle_auth_logon_challenge()
+            when AUTH_LOGON_PROOF
+                return @handle_auth_logon_proof()
+            else
+                LOG_ERROR("> Unhandled command: #{@packet.cmd}")
 
 --- Authserver Class
 class AuthServer
