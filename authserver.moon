@@ -112,7 +112,12 @@ class AuthServerHandler
             @client->setoption("tcp-nodelay", true)
 
         while true
-            client_data = @read_client_data()
+            success = @read_client_data()
+            unless success
+                LOG_INFO("> Client disconnected")
+                break
+            Socket.sleep(.1)
+        return true
 
     handle_auth_logon_challenge: =>
         @packet.error = string.byte(@packet.header, 2)
@@ -121,7 +126,7 @@ class AuthServerHandler
         remaining_data, err = @client->receive(@packet.size)
         unless remaining_data
             LOG_ERROR("> No additional data received: #{err}")
-            return nil
+            return false
 
         auth_challenge_packet = Packet(@packet.header .. remaining_data)
         temp = {
@@ -152,21 +157,27 @@ class AuthServerHandler
         temp.account_name = auth_challenge_packet->read_string(temp.name_length)
 
         LOG_INFO("> Account #{temp.account_name} trying to connect..")
+        return true
 
     read_client_data: =>
         LOG_INFO("> Trying to read data...")
 
         header, err = @client->receive(4)
         unless header
-            LOG_ERROR("> No header received: #{err}")
-            return nil
+            if err == "closed"
+                LOG_INFO("> Client closed connection")
+            elseif err == "timeout"
+                LOG_INFO("> Client connection timeout")
+            else
+                LOG_ERROR("> Connection error: #{err}")
+            return false
         
         @packet.header = header
         @packet.cmd = string.byte(@packet.header, 1)
 
         switch @packet.cmd
             when AUTH_LOGON_CHALLENGE
-                @handle_auth_logon_challenge()
+                return @handle_auth_logon_challenge()
 
 --- Authserver Class
 class AuthServer
