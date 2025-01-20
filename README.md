@@ -5,6 +5,12 @@ ForgeLua is a Proof of Concept (POC) emulator for World of Warcraft: Wrath of th
 
 This is not a complete emulator, but rather a starting point for creating your own WoW server emulator in Lua. It currently supports a limited set of packets and aims to demonstrate how to handle the authentication process and some related communication.
 
+## Project Preview 🎥
+For a visual preview of the project's current progress, you can check out the **Preview** of the project. 
+It includes video milestones showcasing the various stages of development.
+
+[**ForgeLua Project Preview**](https://github.com/iThorgrim/ForgeLua/blob/main/PREVIEW.md)
+
 ## Features 🚀
 - Basic authentication challenge and login proof handling.
 - Simulated responses for successful and failed login attempts.
@@ -56,6 +62,5 @@ Feel free to fork the repository and submit pull requests. Contributions are wel
 
 ## License 📜
 ForgeLua is released under the **GNU General Public License v3.0**. See the [LICENSE](https://github.com/iThorgrim/ForgeLua/blob/main/LICENSE) file for more details.
-
 ___
 Enjoy experimenting with ForgeLua! ✨🛠️
